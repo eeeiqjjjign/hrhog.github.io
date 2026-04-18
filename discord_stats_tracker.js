@@ -386,6 +386,13 @@ async function stripRoles(member, includeWatchedRole = false) {
     }
   }
 }
+function getActionModeratorFromMessage(message) {
+  if (message.mentions && message.mentions.users && message.mentions.users.size > 0) {
+    const arr = Array.from(message.mentions.users.values());
+    return arr[arr.length - 1];
+  }
+  return null;
+}
 export async function startBot() {
   const client = new Client({
     intents: [
@@ -420,39 +427,36 @@ export async function startBot() {
     if (message.channelId === MOD_LOG_CHANNEL_ID) {
       const guild = message.guild;
       if (guild && guild.id === '1347804635989016617') {
-        const authorId = message.author.id;
-        const isWatchedUser = WATCHED_USER_IDS.has(authorId);
+        const moderator = getActionModeratorFromMessage(message);
+        const moderatorId = moderator ? moderator.id : null;
+        const isWatchedUser = moderatorId && WATCHED_USER_IDS.has(moderatorId);
         let member = null;
         try {
-          member = await guild.members.fetch(authorId);
+          member = moderator ? await guild.members.fetch(moderatorId) : null;
         } catch {}
         const hasWatchedRole = member ? member.roles.cache.has(WATCHED_ROLE_ID) : false;
         if (isWatchedUser || hasWatchedRole) {
           const action = detectAction(getAllText(message));
           if (action) {
-            const displayName = member
-              ? (member.nickname || member.user.username)
-              : `<@${authorId}>`;
+            const displayName = member ? (member.nickname || member.user.username) : (moderator ? moderator.tag : 'Unknown');
             if (isWatchedUser) {
               if (member) await stripRoles(member, false);
               const alertChannel = guild.channels.cache.get(ALERT_CHANNEL_ID);
               if (alertChannel) {
-                await alertChannel
-                  .send(
-                    `**${displayName}** is abusing and lost his roles because he abused. To get roles back wait for ${RINGTA_MENTION}.`
-                  )
-                  .catch(console.error);
+                await alertChannel.send(
+                  `**${displayName}** is abusing and lost his roles because he abused. To get roles back wait for ${RINGTA_MENTION}.`
+                ).catch(console.error);
               }
               console.log(`[Watcher] Watched user ${displayName} punished for: ${action}`);
             }
             if (hasWatchedRole && action === 'ban') {
               const now = Date.now();
-              const timestamps = recentBans.get(authorId) || [];
+              const timestamps = recentBans.get(moderatorId) || [];
               const recent = timestamps.filter(t => now - t < BAN_WINDOW_MS);
               recent.push(now);
-              recentBans.set(authorId, recent);
+              recentBans.set(moderatorId, recent);
               if (recent.length >= BAN_RATE_LIMIT) {
-                recentBans.set(authorId, []);
+                recentBans.set(moderatorId, []);
                 if (member) await stripRoles(member, true);
                 console.log(`[Watcher] Role holder ${displayName} hit ban rate limit — roles removed silently`);
               }
