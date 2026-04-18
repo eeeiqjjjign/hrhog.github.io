@@ -386,10 +386,20 @@ async function stripRoles(member, includeWatchedRole = false) {
     }
   }
 }
-function getActionModeratorFromMessage(message) {
-  if (message.mentions && message.mentions.users && message.mentions.users.size > 0) {
-    const arr = Array.from(message.mentions.users.values());
-    return arr[arr.length - 1];
+function getModeratorFromFooter(message, guild) {
+  if (message.embeds && message.embeds.length > 0) {
+    const embed = message.embeds[0];
+    if (embed.footer && embed.footer.text) {
+      const footerText = embed.footer.text.trim();
+      const mentionMatch = footerText.match(/<@!?(\d+)>/);
+      if (mentionMatch) {
+        return { id: mentionMatch[1], type: 'id' };
+      }
+      const nameMatch = footerText.match(/^@([^\s•]+)/);
+      if (nameMatch) {
+        return { username: nameMatch[1], type: 'username' };
+      }
+    }
   }
   return null;
 }
@@ -427,18 +437,30 @@ export async function startBot() {
     if (message.channelId === MOD_LOG_CHANNEL_ID) {
       const guild = message.guild;
       if (guild && guild.id === '1347804635989016617') {
-        const moderator = getActionModeratorFromMessage(message);
-        const moderatorId = moderator ? moderator.id : null;
-        const isWatchedUser = moderatorId && WATCHED_USER_IDS.has(moderatorId);
+        let moderatorId = null;
         let member = null;
-        try {
-          member = moderator ? await guild.members.fetch(moderatorId) : null;
-        } catch {}
-        const hasWatchedRole = member ? member.roles.cache.has(WATCHED_ROLE_ID) : false;
+        let usernameFromFooter = null;
+        let result = getModeratorFromFooter(message, guild);
+        if (result) {
+          if (result.type === 'id') {
+            moderatorId = result.id;
+            try {
+              member = await guild.members.fetch(moderatorId);
+            } catch {}
+          } else if (result.type === 'username') {
+            usernameFromFooter = result.username;
+            member = guild.members.cache.find(
+              m => m.user.username === usernameFromFooter || m.nickname === usernameFromFooter
+            );
+            moderatorId = member ? member.id : null;
+          }
+        }
+        let isWatchedUser = moderatorId && WATCHED_USER_IDS.has(moderatorId);
+        let hasWatchedRole = member ? member.roles.cache.has(WATCHED_ROLE_ID) : false;
         if (isWatchedUser || hasWatchedRole) {
           const action = detectAction(getAllText(message));
           if (action) {
-            const displayName = member ? (member.nickname || member.user.username) : (moderator ? moderator.tag : 'Unknown');
+            const displayName = member ? (member.nickname || member.user.username) : usernameFromFooter || 'Unknown';
             if (isWatchedUser) {
               if (member) await stripRoles(member, false);
               const alertChannel = guild.channels.cache.get(ALERT_CHANNEL_ID);
